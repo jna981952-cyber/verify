@@ -1,0 +1,67 @@
+{
+  "name": "verify-cli",
+  "version": "0.1.0",
+  "description": "Checks code changes, finds what might break, and tests it before you ship.",
+  "keywords": [
+    "cli",
+    "verify",
+    "static-analysis",
+    "developer-tools"
+  ],
+  "homepage": "https://github.com/jna981952-cyber/verify#readme",
+  "bugs": {
+    "url": "https://github.com/jna981952-cyber/verify/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jna981952-cyber/verify.git"
+  },
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "verify": "./dist/bin/verify.js"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "!dist/**/*.test.*",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md"
+  ],
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "clean": "node scripts/clean.mjs",
+    "prebuild": "node scripts/clean.mjs",
+    "build": "tsc --project tsconfig.build.json",
+    "build:tests": "tsc --project tsconfig.test.json",
+    "typecheck": "tsc --project tsconfig.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "npm run build:tests && node --test \"test-build/**/*.test.js\"",
+    "test:coverage": "npm run build:tests && node --test --experimental-test-coverage \"test-build/**/*.test.js\"",
+    "check": "npm run lint && npm run format:check && npm run typecheck && npm run build && npm run test",
+    "prepack": "npm run build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "@types/node": "^24.0.0",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.6",
+    "typescript": "^6.0.3",
+    "typescript-eslint": "^8.69.0"
+  }
+}
