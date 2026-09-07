@@ -110,4 +110,32 @@ describe('parseCliArgs', () => {
   it('rejects an unknown command as a second path', () => {
     assert.throws(() => parseCliArgs(['.', 'nonsense']), UsageError);
   });
+
+  it('recognises the analyze command', () => {
+    assert.deepEqual(parseCliArgs(['analyze']), {
+      mode: 'analyze',
+      target: DEFAULT_TARGET,
+      json: false,
+      noColor: false,
+    });
+  });
+
+  it('reads a path and flags after the analyze command', () => {
+    const args = parseCliArgs(['analyze', './src', '--json']);
+
+    assert.equal(args.mode, 'analyze');
+    assert.equal(args.target, './src');
+    assert.equal(args.json, true);
+  });
+
+  it('rejects more than one path after analyze', () => {
+    assert.throws(
+      () => parseCliArgs(['analyze', 'one', 'two']),
+      (error: unknown) => {
+        assert.ok(error instanceof UsageError);
+        assert.match(error.message, /at most one path for `analyze`/);
+        return true;
+      },
+    );
+  });
 });

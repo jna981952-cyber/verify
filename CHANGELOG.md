@@ -7,10 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Stage 2: Git change detection.
+Stages 2 and 3: Git change detection and codebase analysis.
 
 ### Added
 
+- `verify analyze [path]` command that parses every JavaScript and TypeScript
+  file under a directory and reports what it finds, with `--json` for the full
+  inventory.
+- Detection of imports and exports in every ESM form plus dynamic `import()`,
+  `require()` and the CommonJS `module.exports` assignments.
+- Detection of functions, classes, methods, variables, interfaces, type
+  aliases, enums and React components, each with its location and whether it
+  leaves the module.
+- Detection of test files, `describe`/`it`/`test` declarations, and API routes
+  written as Express-style router calls, Next.js App Router handlers or Next.js
+  `pages/api` endpoints.
+- A dependency graph over the analysed files, with symbol-level edges recorded
+  only where the target really exports the name.
+- Typed models (`CodebaseAnalysis`, `FileAnalysis`, `CodeSymbol`,
+  `DependencyGraph`) and their extractors exported for programmatic use.
 - `verify changes [path]` command that reports the Git changes in the target's
   repository, with `--json` for machine-readable output.
 - Detection of the repository root, the current branch and commit, a detached
@@ -21,6 +36,12 @@ Stage 2: Git change detection.
   similarity scores and binary-content detection.
 - Typed models (`ChangeSet`, `FileChange`, `DiffHunk`, `GitHead`) and their
   parsers exported for programmatic use, with an injectable `git` runner.
+
+### Dependencies
+
+- `typescript` moved from a development dependency to a runtime one: the
+  analyser uses its parser to build syntax trees. It resolves no types, creates
+  no program and executes nothing it reads.
 
 ## [0.1.0] - 2026-09-07
 

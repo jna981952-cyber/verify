@@ -1,5 +1,6 @@
-import { type ChangesReport, type Report } from '../core/report.js';
+import { type AnalysisReport, type ChangesReport, type Report } from '../core/report.js';
 import { type Palette } from '../utils/color.js';
+import { formatAnalysisJson, formatAnalysisText } from './analysis.js';
 import { formatChangesJson, formatChangesText } from './changes.js';
 import { formatJsonReport } from './json.js';
 import { formatTextReport } from './text.js';
@@ -38,6 +39,17 @@ export function formatChangesReport(report: ChangesReport, options: FormatOption
   }
 }
 
+/** Renders an analysis report in the requested format. */
+export function formatAnalysisReport(report: AnalysisReport, options: FormatOptions): string {
+  switch (options.format) {
+    case 'json':
+      return formatAnalysisJson(report);
+    case 'text':
+      return formatAnalysisText(report, options.palette);
+  }
+}
+
+export { formatAnalysisJson, formatAnalysisText } from './analysis.js';
 export { describeHead, formatChangesJson, formatChangesText } from './changes.js';
 export { formatJsonReport } from './json.js';
 export { formatTextReport } from './text.js';

@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { UsageError, toErrorMessage } from '../utils/errors.js';
 
 /** Subcommands the CLI understands. */
-export const COMMANDS = ['changes'] as const;
+export const COMMANDS = ['changes', 'analyze'] as const;
 
 /** Union of the recognised subcommands. */
 export type CliCommand = (typeof COMMANDS)[number];

@@ -8,6 +8,7 @@ Usage
 Commands
   (none)           Report project context for the path
   changes          List the Git changes in the path's repository
+  analyze          Inventory the JavaScript and TypeScript source in the path
 
 Arguments
   path             Directory to inspect (default: ".")
@@ -28,7 +29,9 @@ Examples
   ${TOOL_NAME} .
   ${TOOL_NAME} ./packages/api --json
   ${TOOL_NAME} changes
-  ${TOOL_NAME} changes ./packages/api --json`;
+  ${TOOL_NAME} changes ./packages/api --json
+  ${TOOL_NAME} analyze ./src
+  ${TOOL_NAME} analyze --json`;
 
 /** Returns the full `--help` output. */
 export function formatHelp(): string {

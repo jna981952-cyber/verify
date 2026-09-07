@@ -1,4 +1,5 @@
 import { TOOL_NAME, VERSION } from '../version.js';
+import { type CodebaseAnalysis } from './analysis/types.js';
 import { type ChangeSet } from './git/types.js';
 import { type ProjectInfo } from './project.js';
 import { type Target } from './target.js';
@@ -50,5 +51,27 @@ export function createChangesReport(target: Target, changes: ChangeSet): Changes
     tool: { name: TOOL_NAME, version: VERSION },
     target: target.path,
     changes,
+  };
+}
+
+/**
+ * The result of a single `verify analyze` run.
+ *
+ * Uses the same envelope as the other reports so every `--json` payload is
+ * recognisable as output from the same tool.
+ */
+export interface AnalysisReport {
+  readonly tool: ToolInfo;
+  /** Absolute path the command was pointed at. */
+  readonly target: string;
+  readonly analysis: CodebaseAnalysis;
+}
+
+/** Builds the report for an analysed codebase. */
+export function createAnalysisReport(target: Target, analysis: CodebaseAnalysis): AnalysisReport {
+  return {
+    tool: { name: TOOL_NAME, version: VERSION },
+    target: target.path,
+    analysis,
   };
 }

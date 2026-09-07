@@ -262,3 +262,101 @@ describe('runCli changes', () => {
     return created.path;
   }
 });
+
+describe('runCli analyze', () => {
+  const fixtures: Fixture[] = [];
+
+  after(async () => {
+    await Promise.all(fixtures.map((created) => created.cleanup()));
+  });
+
+  async function tree(files: Readonly<Record<string, string>> = {}): Promise<string> {
+    const created = await createFixture(files);
+    fixtures.push(created);
+    return created.path;
+  }
+
+  const project: Readonly<Record<string, string>> = {
+    'src/money.ts': 'export type Money = number;\nexport function format(m: Money) { return m; }\n',
+    'src/Button.tsx':
+      "import { format } from './money.js';\nexport const Button = () => <b>{format(1)}</b>;\n",
+    'src/server.js': "app.get('/health', (req, res) => res.end());\n",
+    'src/Button.test.tsx': "it('renders', () => {});\n",
+  };
+
+  it('summarises the source in the working directory', async () => {
+    const result = await run(['analyze'], { cwd: await tree(project) });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.match(result.stdout, /^Analysed 4 files under /m);
+    assert.match(result.stdout, /^ {2}1 React component$/m);
+    assert.match(result.stdout, /^ {2}1 test file, 1 test$/m);
+    assert.match(result.stdout, /^ {2}GET {2}\/health {2}src\/server\.js:1$/m);
+  });
+
+  it('accepts a path after the command', async () => {
+    const root = await tree(project);
+
+    const result = await run(['analyze', root], { cwd: await tree() });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /Analysed 4 files/);
+  });
+
+  it('emits machine-readable JSON', async () => {
+    const root = await tree(project);
+
+    const result = await run(['analyze', '--json'], { cwd: root });
+    const payload = JSON.parse(result.stdout) as {
+      tool: { name: string };
+      target: string;
+      analysis: {
+        files: { path: string; symbols: { name: string; kind: string }[] }[];
+        graph: { dependencies: Record<string, string[]>; symbolEdges: { exported: string }[] };
+        summary: { files: number; symbols: { component: number } };
+      };
+    };
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(payload.tool.name, 'verify');
+    assert.equal(payload.target, root);
+    assert.equal(payload.analysis.summary.files, 4);
+    assert.equal(payload.analysis.summary.symbols.component, 1);
+    assert.deepEqual(payload.analysis.graph.dependencies['src/Button.tsx'], ['src/money.ts']);
+    assert.deepEqual(
+      payload.analysis.graph.symbolEdges.map((edge) => edge.exported),
+      ['format'],
+    );
+  });
+
+  it('reports a directory with no source', async () => {
+    const result = await run(['analyze'], { cwd: await tree({ 'README.md': '# hi' }) });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /No JavaScript or TypeScript files found\./);
+  });
+
+  it('fails with the usage exit code when the path does not exist', async () => {
+    const result = await run(['analyze', './missing'], { cwd: await tree() });
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Cannot read target path/);
+  });
+
+  it('does not crash on malformed source', async () => {
+    const result = await run(['analyze'], {
+      cwd: await tree({ 'a.ts': 'export const ok = 1;\n', 'b.ts': 'function ((( bad\n' }),
+    });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /Analysed 2 files/);
+  });
+
+  it('writes plain text when the output is not a terminal', async () => {
+    const result = await run(['analyze'], { cwd: await tree(project) });
+
+    assert.ok(!result.stdout.includes(ESC));
+  });
+});

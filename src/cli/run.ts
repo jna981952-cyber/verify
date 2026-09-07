@@ -1,14 +1,26 @@
+import { analyzeCodebase } from '../core/analysis/analyze.js';
 import { requireChanges } from '../core/git/changes.js';
 import { createGitRunner, type GitRunner } from '../core/git/runner.js';
 import { inspectProject } from '../core/project.js';
-import { createChangesReport, createReport, type ChangesReport } from '../core/report.js';
+import {
+  createAnalysisReport,
+  createChangesReport,
+  createReport,
+  type AnalysisReport,
+  type ChangesReport,
+} from '../core/report.js';
 import { resolveTarget, type Target } from '../core/target.js';
-import { formatChangesReport, formatReport, type FormatOptions } from '../reporters/index.js';
+import {
+  formatAnalysisReport,
+  formatChangesReport,
+  formatReport,
+  type FormatOptions,
+} from '../reporters/index.js';
 import { createPalette, shouldUseColor, type Palette } from '../utils/color.js';
 import { ExitCode, isVerifyError, toErrorMessage } from '../utils/errors.js';
 import { createLogger, type Logger } from '../utils/logger.js';
 import { TOOL_NAME } from '../version.js';
-import { parseCliArgs } from './args.js';
+import { parseCliArgs, type CliMode } from './args.js';
 import { formatHelp, formatUsageHint, formatVersion } from './help.js';
 
 /**
@@ -65,6 +77,27 @@ async function buildChangesReport(target: Target, context: CliContext): Promise<
   return createChangesReport(target, changes);
 }
 
+async function buildAnalysisReport(target: Target): Promise<AnalysisReport> {
+  return createAnalysisReport(target, await analyzeCodebase(target.path));
+}
+
+/** Runs the command the invocation asked for and returns its rendered report. */
+async function renderCommand(
+  mode: Exclude<CliMode, 'help' | 'version'>,
+  target: Target,
+  context: CliContext,
+  format: FormatOptions,
+): Promise<string> {
+  switch (mode) {
+    case 'changes':
+      return formatChangesReport(await buildChangesReport(target, context), format);
+    case 'analyze':
+      return formatAnalysisReport(await buildAnalysisReport(target), format);
+    case 'inspect':
+      return formatReport(createReport(target, await inspectProject(target)), format);
+  }
+}
+
 /**
  * Runs the CLI end to end and returns the process exit code.
  *
@@ -104,11 +137,7 @@ export async function runCli(
     const format: FormatOptions = { format: args.json ? 'json' : 'text', palette };
     const target = await resolveTarget(args.target, context.cwd);
 
-    logger.out(
-      args.mode === 'changes'
-        ? formatChangesReport(await buildChangesReport(target, context), format)
-        : formatReport(createReport(target, await inspectProject(target)), format),
-    );
+    logger.out(await renderCommand(args.mode, target, context, format));
     return ExitCode.Success;
   } catch (error) {
     return reportError(error, logger, palette);
