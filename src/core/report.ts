@@ -1,6 +1,7 @@
 import { TOOL_NAME, VERSION } from '../version.js';
 import { type CodebaseAnalysis } from './analysis/types.js';
 import { type ChangeSet } from './git/types.js';
+import { type ImpactAnalysis } from './impact/types.js';
 import { type ProjectInfo } from './project.js';
 import { type Target } from './target.js';
 
@@ -73,5 +74,27 @@ export function createAnalysisReport(target: Target, analysis: CodebaseAnalysis)
     tool: { name: TOOL_NAME, version: VERSION },
     target: target.path,
     analysis,
+  };
+}
+
+/**
+ * The result of a single `verify impact` run.
+ *
+ * Uses the same envelope as the other reports so every `--json` payload is
+ * recognisable as output from the same tool.
+ */
+export interface ImpactReport {
+  readonly tool: ToolInfo;
+  /** Absolute path the command was pointed at. */
+  readonly target: string;
+  readonly impact: ImpactAnalysis;
+}
+
+/** Builds the report for an impact analysis. */
+export function createImpactReport(target: Target, impact: ImpactAnalysis): ImpactReport {
+  return {
+    tool: { name: TOOL_NAME, version: VERSION },
+    target: target.path,
+    impact,
   };
 }

@@ -10,15 +10,15 @@
 
 ## Project status
 
-**Stage 3 — codebase analysis.** On top of the Stage 1 foundation and the
-Stage 2 Git change detection, `verify` now reads the source itself: it parses
-every JavaScript and TypeScript file into a syntax tree and reports the
-declarations, modules, tests and API routes it finds, along with a dependency
-graph over the files and the symbols they share.
+**Stage 4 — impact analysis.** `verify` now joins the two halves it built
+first: it takes the Git changes from Stage 2, the codebase analysis from
+Stage 3, and walks the dependency graph backwards from what changed to find
+what depends on it — files, tests, React components and API routes — recording
+why each one was selected.
 
-So `verify` can now say what changed and what is there. It cannot yet say which
-of those changes might break what, or run any checks; that arrives in later
-stages.
+So `verify` can now say what changed, what is there, and what a change reaches.
+It cannot yet run any checks, and it never claims anything about behaviour at
+runtime; that is out of reach of reading source alone.
 
 Everything documented below works today.
 
@@ -154,6 +154,91 @@ What the analyser recognises:
 Everything is read from syntax alone — no types are resolved, no code is
 executed, and nothing is sent anywhere.
 
+### `verify impact` — what the change reaches
+
+```bash
+verify impact
+```
+
+```text
+On branch main at a1b2c3d
+
+Changed:
+  src/checkout.ts
+
+Changed symbols:
+  CheckoutService         class in src/checkout.ts
+  CheckoutService.submit  method in src/checkout.ts
+
+Directly affected:
+  src/api/checkout.ts
+  src/cart.ts
+  tests/checkout.test.ts
+
+Indirectly affected:
+  src/pages/checkout.tsx
+
+Affected tests:
+  tests/checkout.test.ts (2 tests)
+
+Affected components:
+  CheckoutPage  src/pages/checkout.tsx
+
+Affected API routes:
+  POST  /checkout  src/api/checkout.ts
+
+Reasons:
+  src/api/checkout.ts imports checkout from src/checkout.ts, which changed elsewhere
+  src/cart.ts imports CheckoutService from src/checkout.ts, and CheckoutService changed
+  tests/checkout.test.ts imports checkout from src/checkout.ts, which changed elsewhere
+  src/pages/checkout.tsx imports CartService from src/cart.ts, which is affected
+```
+
+Every affected item is backed by a sentence in the reasons block, and the
+wording is chosen to claim no more than was established:
+
+| Wording                       | What it means                                                               |
+| ----------------------------- | --------------------------------------------------------------------------- |
+| `and CheckoutService changed` | The diff touched the lines that declaration spans.                          |
+| `which changed elsewhere`     | The name is imported from a file that changed, but not from a changed line. |
+| `which is affected`           | The file it depends on is itself affected, one hop closer to the change.    |
+| `which was deleted`           | The specifier used to resolve to a file the change set removed.             |
+
+`Changed symbols` is the precise half: a declaration appears there only when a
+changed line falls inside its range. The affected lists are the conservative
+half — a change anywhere in a file can reach anything else in it, so a changed
+file contributes everything it declares.
+
+### Impact depth
+
+The search follows three hops by default. `--depth` changes that, and the
+distance is what separates direct from indirect:
+
+```bash
+verify impact --depth 1     # direct dependents only
+verify impact --depth 0     # what changed, and nothing followed
+verify impact --depth 10    # follow further out
+```
+
+When the limit stops the search with more still to follow, the report says so
+rather than presenting a partial answer as a complete one.
+
+### What impact analysis will not tell you
+
+It reads source and nothing else, so it does not follow:
+
+- anything wired up at runtime — dependency injection, service locators, a
+  registry populated by strings;
+- a specifier that is built rather than written, including a dynamic
+  `import()` whose argument is a variable;
+- packages, monorepo links and `tsconfig` path aliases, which resolve outside
+  the analysed tree;
+- which declaration inside an affected file actually uses the imported name,
+  which would take resolving types.
+
+Nothing on those lists is guessed at. A missed relationship is the failure mode
+this is built for; a fabricated one is not.
+
 ### Commands
 
 | Command   | Description                                                 |
@@ -161,6 +246,7 @@ executed, and nothing is sent anywhere.
 | _(none)_  | Report project context for the path.                        |
 | `changes` | List the Git changes in the path's repository.              |
 | `analyze` | Inventory the JavaScript and TypeScript source in the path. |
+| `impact`  | Trace what the current Git changes reach.                   |
 
 ### Arguments
 
@@ -174,12 +260,13 @@ command.
 
 ### Options
 
-| Option            | Description                       |
-| ----------------- | --------------------------------- |
-| `-h`, `--help`    | Show the help text and exit.      |
-| `-v`, `--version` | Show the version number and exit. |
-| `--json`          | Print the report as JSON.         |
-| `--no-color`      | Disable coloured output.          |
+| Option            | Description                                            |
+| ----------------- | ------------------------------------------------------ |
+| `-h`, `--help`    | Show the help text and exit.                           |
+| `-v`, `--version` | Show the version number and exit.                      |
+| `--json`          | Print the report as JSON.                              |
+| `--no-color`      | Disable coloured output.                               |
+| `--depth N`       | Hops `impact` follows away from a change (default: 3). |
 
 Colour is enabled automatically when standard output is a terminal, and is
 suppressed by `--no-color`, by [`NO_COLOR`](https://no-color.org), or by
@@ -332,6 +419,52 @@ purpose: an edge appears only where the specifier resolved to an analysed file
 **and** that file really exports the name, so every symbol edge is a
 relationship that was checked rather than inferred.
 
+`verify impact --json` carries the same reasons the text report shows, in a
+form scripts can branch on:
+
+```json
+{
+  "impact": {
+    "depth": 3,
+    "truncated": false,
+    "changed": [
+      {
+        "path": "src/checkout.ts",
+        "kind": "modified",
+        "analysed": true,
+        "precision": "exact",
+        "symbols": [
+          { "name": "submit", "kind": "method", "container": "CheckoutService", "lines": [3] }
+        ]
+      }
+    ],
+    "affected": [
+      {
+        "path": "src/cart.ts",
+        "distance": 1,
+        "reasons": [
+          {
+            "via": "src/checkout.ts",
+            "relation": "imports-changed-symbol",
+            "symbol": "CheckoutService",
+            "specifier": "./checkout.js",
+            "typeOnly": false,
+            "detail": "src/cart.ts imports CheckoutService from src/checkout.ts, and CheckoutService changed"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+`precision` says how the changed declarations were arrived at: `exact` from
+diff hunks, `whole-file` for a file that is new in its entirety, and `unknown`
+when neither was available — a binary or deleted file — in which case no
+declarations are claimed rather than every one being assumed. `relation` is one
+of `imports-changed-symbol`, `imports-symbol`, `imports-file`, `re-exports` or
+`imports-deleted-file`.
+
 ## Programmatic use
 
 The package also exports its building blocks, so the same logic can be used
@@ -356,6 +489,21 @@ for (const file of changes?.files ?? []) {
 `collectChanges` accepts a `runner` so `git` can be replaced in tests, and the
 individual parsers (`parseStatus`, `parseNumstat`, `parseHunks`) are exported
 too, for working with git output you already have.
+
+Impact analysis is exported too, and takes the same depth option the CLI does:
+
+```ts
+import { analyzeImpact } from 'verify-cli';
+
+const impact = await analyzeImpact('.', { depth: 1 });
+
+for (const file of impact.affected) {
+  console.log(
+    file.path,
+    file.reasons.map((reason) => reason.detail),
+  );
+}
+```
 
 The analyser is exported the same way, including `analyzeSource` for a single
 file you already hold in memory:
@@ -408,12 +556,18 @@ src/
 │   │   ├── runner.ts     Runs git; injectable, so failures are testable
 │   │   ├── status.ts     Parses git status --porcelain=v2
 │   │   └── types.ts      The typed models everything else speaks in
+│   ├── impact/       What a change reaches
+│   │   ├── changed.ts    Maps a diff onto the declarations it touched
+│   │   ├── impact.ts     Composes changes, analysis and the search
+│   │   ├── traverse.ts   Walks the dependency graph backwards, with reasons
+│   │   └── types.ts      The typed models everything else speaks in
 │   ├── manifest.ts   Reads package.json
 │   ├── project.ts    Detects package manager, VCS and TypeScript
 │   ├── report.ts     The report shapes shared by every reporter
 │   └── target.ts     Resolves and validates the target directory
 ├── reporters/        Rendering
 │   ├── analysis.ts   Codebase inventory, human-readable and JSON
+│   ├── impact.ts     Impact report, human-readable and JSON
 │   ├── changes.ts    Change summary, human-readable and JSON
 │   ├── text.ts       Human-readable summary
 │   └── json.ts       Machine-readable report
@@ -437,6 +591,9 @@ Two rules keep the layers honest:
 - **The analyser never executes what it reads.** Source is parsed, never run,
   and a file it cannot make sense of is reported as far as it got rather than
   failing the run.
+- **Every impact carries its reason.** Nothing appears in an impact report
+  without a sentence saying which relationship put it there, and relationships
+  the source does not state are not followed at all.
 
 ## Dependencies
 
@@ -474,10 +631,10 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 
 ## Roadmap
 
-Stage 1 built the foundation, Stage 2 the Git change detection, and Stage 3 the
-codebase analysis described above. Later stages connect the two — what changed
-and what is there — and add checks on top. Scope for those is decided when they
-start; nothing beyond this stage is implemented or promised here.
+Stage 1 built the foundation, Stage 2 the Git change detection, Stage 3 the
+codebase analysis, and Stage 4 the impact analysis that joins them. Later
+stages build checks on top. Scope for those is decided when they start; nothing
+beyond this stage is implemented or promised here.
 
 ## License
 

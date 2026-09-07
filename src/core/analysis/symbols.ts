@@ -1,14 +1,14 @@
 import ts from 'typescript';
 
 import { isDefaultExported, isExported, nameOf } from './ast.js';
-import { locationOf } from './parser.js';
+import { spanOf, type NodeSpan } from './parser.js';
 import {
   containsJsx,
   isComponentFunction,
   isReactComponentClass,
   unwrapComponentFactory,
 } from './react.js';
-import { type CodeSymbol, type SourceLocation, type SymbolKind } from './types.js';
+import { type CodeSymbol, type SymbolKind } from './types.js';
 
 /** Name reported for a declaration exported without one. */
 const ANONYMOUS_DEFAULT = 'default';
@@ -25,9 +25,16 @@ function add(
   name: string,
   kind: SymbolKind,
   exported: boolean,
-  location: SourceLocation,
+  span: NodeSpan,
 ): void {
-  context.symbols.push({ name, kind, exported, container: context.container, location });
+  context.symbols.push({
+    name,
+    kind,
+    exported,
+    container: context.container,
+    location: span.location,
+    endLine: span.endLine,
+  });
 }
 
 /** Names bound by a declaration, flattened out of destructuring patterns. */
@@ -54,10 +61,10 @@ function collectClassMembers(context: Context, node: ts.ClassLikeDeclaration, ow
   const nested: Context = { ...context, container: owner };
 
   for (const member of node.members) {
-    const location = locationOf(context.source, member);
+    const span = spanOf(context.source, member);
 
     if (ts.isConstructorDeclaration(member)) {
-      add(nested, 'constructor', 'method', false, location);
+      add(nested, 'constructor', 'method', false, span);
       continue;
     }
 
@@ -71,7 +78,7 @@ function collectClassMembers(context: Context, node: ts.ClassLikeDeclaration, ow
       ts.isGetAccessorDeclaration(member) ||
       ts.isSetAccessorDeclaration(member)
     ) {
-      add(nested, name, 'method', false, location);
+      add(nested, name, 'method', false, span);
       continue;
     }
 
@@ -81,7 +88,7 @@ function collectClassMembers(context: Context, node: ts.ClassLikeDeclaration, ow
       member.initializer !== undefined &&
       isFunctionExpression(member.initializer)
     ) {
-      add(nested, name, 'method', false, location);
+      add(nested, name, 'method', false, span);
     }
   }
 }
@@ -91,9 +98,9 @@ function collectClass(
   node: ts.ClassLikeDeclaration,
   name: string,
   exported: boolean,
-  location: SourceLocation,
+  span: NodeSpan,
 ): void {
-  add(context, name, isReactComponentClass(node) ? 'component' : 'class', exported, location);
+  add(context, name, isReactComponentClass(node) ? 'component' : 'class', exported, span);
   collectClassMembers(context, node, name);
 }
 
@@ -102,14 +109,14 @@ function collectVariable(
   declaration: ts.VariableDeclaration,
   exported: boolean,
 ): void {
-  const location = locationOf(context.source, declaration);
+  const span = spanOf(context.source, declaration);
   const names = boundNames(declaration.name);
   const initializer = declaration.initializer;
   const [name] = names;
 
   if (initializer === undefined || name === undefined || names.length > 1) {
     for (const bound of names) {
-      add(context, bound, 'variable', exported, location);
+      add(context, bound, 'variable', exported, span);
     }
     return;
   }
@@ -117,26 +124,20 @@ function collectVariable(
   const value = unwrapComponentFactory(initializer);
 
   if (ts.isClassExpression(value)) {
-    collectClass(context, value, name, exported, location);
+    collectClass(context, value, name, exported, span);
     return;
   }
 
   if (isFunctionExpression(value)) {
-    add(
-      context,
-      name,
-      isComponentFunction(name, value) ? 'component' : 'function',
-      exported,
-      location,
-    );
+    add(context, name, isComponentFunction(name, value) ? 'component' : 'function', exported, span);
     return;
   }
 
-  add(context, name, 'variable', exported, location);
+  add(context, name, 'variable', exported, span);
 }
 
 function collectStatement(context: Context, statement: ts.Statement): void {
-  const location = locationOf(context.source, statement);
+  const span = spanOf(context.source, statement);
   const exported = isExported(statement);
   const declaredName = nameOf(statement);
 
@@ -144,7 +145,7 @@ function collectStatement(context: Context, statement: ts.Statement): void {
     const name = declaredName ?? (isDefaultExported(statement) ? ANONYMOUS_DEFAULT : null);
     if (name !== null) {
       const kind = isComponentFunction(name, statement) ? 'component' : 'function';
-      add(context, name, kind, exported, location);
+      add(context, name, kind, exported, span);
     }
     return;
   }
@@ -152,7 +153,7 @@ function collectStatement(context: Context, statement: ts.Statement): void {
   if (ts.isClassDeclaration(statement)) {
     const name = declaredName ?? (isDefaultExported(statement) ? ANONYMOUS_DEFAULT : null);
     if (name !== null) {
-      collectClass(context, statement, name, exported, location);
+      collectClass(context, statement, name, exported, span);
     }
     return;
   }
@@ -165,17 +166,17 @@ function collectStatement(context: Context, statement: ts.Statement): void {
   }
 
   if (ts.isInterfaceDeclaration(statement) && declaredName !== null) {
-    add(context, declaredName, 'interface', exported, location);
+    add(context, declaredName, 'interface', exported, span);
     return;
   }
 
   if (ts.isTypeAliasDeclaration(statement) && declaredName !== null) {
-    add(context, declaredName, 'type', exported, location);
+    add(context, declaredName, 'type', exported, span);
     return;
   }
 
   if (ts.isEnumDeclaration(statement) && declaredName !== null) {
-    add(context, declaredName, 'enum', exported, location);
+    add(context, declaredName, 'enum', exported, span);
     return;
   }
 
@@ -184,16 +185,10 @@ function collectStatement(context: Context, statement: ts.Statement): void {
   if (ts.isExportAssignment(statement)) {
     const value = unwrapComponentFactory(statement.expression);
     if (ts.isClassExpression(value)) {
-      collectClass(context, value, ANONYMOUS_DEFAULT, true, location);
+      collectClass(context, value, ANONYMOUS_DEFAULT, true, span);
     } else if (isFunctionExpression(value)) {
       // A default export has no name to judge, so JSX alone decides.
-      add(
-        context,
-        ANONYMOUS_DEFAULT,
-        containsJsx(value) ? 'component' : 'function',
-        true,
-        location,
-      );
+      add(context, ANONYMOUS_DEFAULT, containsJsx(value) ? 'component' : 'function', true, span);
     }
     return;
   }

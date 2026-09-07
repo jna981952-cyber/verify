@@ -3,7 +3,7 @@ import { after, describe, it } from 'node:test';
 
 import { GitUnavailableError, type GitRunner } from '../core/git/runner.js';
 import { createFixture, packageJson, type Fixture } from '../test-helpers/fixtures.js';
-import { createGitFixture } from '../test-helpers/git.js';
+import { createGitFixture, type GitFixture } from '../test-helpers/git.js';
 import { createMemoryLogger } from '../utils/logger.js';
 import { VERSION } from '../version.js';
 import { runCli } from './run.js';
@@ -356,6 +356,145 @@ describe('runCli analyze', () => {
 
   it('writes plain text when the output is not a terminal', async () => {
     const result = await run(['analyze'], { cwd: await tree(project) });
+
+    assert.ok(!result.stdout.includes(ESC));
+  });
+});
+
+describe('runCli impact', () => {
+  const cleanups: (() => Promise<void>)[] = [];
+
+  after(async () => {
+    await Promise.all(cleanups.map((cleanup) => cleanup()));
+  });
+
+  const project: Readonly<Record<string, string>> = {
+    'src/checkout.ts': "export function checkout() {\n  return 'ok';\n}\n",
+    'src/cart.ts':
+      "import { checkout } from './checkout.js';\nexport const pay = () => checkout();\n",
+    'src/page.tsx': "import { pay } from './cart.js';\nexport const Page = () => <b>{pay()}</b>;\n",
+    'src/api.js': "app.post('/pay', (req, res) => res.end());\nmodule.exports = app;\n",
+    'tests/checkout.test.ts':
+      "import { checkout } from '../src/checkout.js';\nit('works', () => checkout());\n",
+  };
+
+  async function repository(): Promise<GitFixture> {
+    const created = await createGitFixture(project);
+    cleanups.push(created.cleanup.bind(created));
+    await created.commit('initial');
+    return created;
+  }
+
+  async function plainDirectory(): Promise<string> {
+    const created = await createFixture();
+    cleanups.push(created.cleanup.bind(created));
+    return created.path;
+  }
+
+  it('traces what the working tree changes reach', async () => {
+    const repo = await repository();
+    await repo.write('src/checkout.ts', "export function checkout() {\n  return 'sent';\n}\n");
+
+    const result = await run(['impact'], { cwd: repo.path });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.match(result.stdout, /^Changed:\n {2}src\/checkout\.ts$/m);
+    assert.match(
+      result.stdout,
+      /^Directly affected:\n {2}src\/cart\.ts\n {2}tests\/checkout\.test\.ts$/m,
+    );
+    assert.match(result.stdout, /^Indirectly affected:\n {2}src\/page\.tsx$/m);
+    assert.match(result.stdout, /^Affected tests:\n {2}tests\/checkout\.test\.ts/m);
+    assert.match(
+      result.stdout,
+      /src\/cart\.ts imports checkout from src\/checkout\.ts, and checkout changed/,
+    );
+  });
+
+  it('reports a clean repository', async () => {
+    const result = await run(['impact'], { cwd: (await repository()).path });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /No changes to analyse\./);
+  });
+
+  it('accepts a path after the command', async () => {
+    const repo = await repository();
+    await repo.write('src/checkout.ts', "export function checkout() {\n  return 'sent';\n}\n");
+
+    const result = await run(['impact', repo.path], { cwd: await plainDirectory() });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /src\/cart\.ts/);
+  });
+
+  it('honours the depth option', async () => {
+    const repo = await repository();
+    await repo.write('src/checkout.ts', "export function checkout() {\n  return 'sent';\n}\n");
+
+    const result = await run(['impact', '--depth', '1'], { cwd: repo.path });
+
+    assert.equal(result.exitCode, 0);
+    assert.doesNotMatch(result.stdout, /Indirectly affected:/);
+    assert.match(result.stdout, /stopped at depth 1/);
+  });
+
+  it('emits machine-readable JSON', async () => {
+    const repo = await repository();
+    await repo.write('src/checkout.ts', "export function checkout() {\n  return 'sent';\n}\n");
+
+    const result = await run(['impact', '--json'], { cwd: repo.path });
+    const payload = JSON.parse(result.stdout) as {
+      tool: { name: string };
+      target: string;
+      impact: {
+        depth: number;
+        truncated: boolean;
+        changed: { path: string; symbols: { name: string }[] }[];
+        affected: { path: string; distance: number; reasons: { relation: string }[] }[];
+        summary: { directlyAffected: number; indirectlyAffected: number };
+      };
+    };
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(payload.tool.name, 'verify');
+    assert.equal(payload.target, repo.path);
+    assert.equal(payload.impact.depth, 3);
+    assert.equal(payload.impact.truncated, false);
+    assert.deepEqual(
+      payload.impact.changed.map((file) => file.path),
+      ['src/checkout.ts'],
+    );
+    assert.deepEqual(
+      payload.impact.changed[0]?.symbols.map((symbol) => symbol.name),
+      ['checkout'],
+    );
+    assert.equal(payload.impact.summary.directlyAffected, 2);
+    assert.equal(payload.impact.summary.indirectlyAffected, 1);
+    assert.equal(payload.impact.affected[0]?.reasons[0]?.relation, 'imports-changed-symbol');
+  });
+
+  it('fails with the usage exit code outside a repository', async () => {
+    const result = await run(['impact'], { cwd: await plainDirectory() });
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Not a Git repository/);
+  });
+
+  it('fails with the usage exit code for an unusable depth', async () => {
+    const result = await run(['impact', '--depth', 'lots'], { cwd: await plainDirectory() });
+
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderr, /--depth must be a whole number/);
+  });
+
+  it('writes plain text when the output is not a terminal', async () => {
+    const repo = await repository();
+    await repo.write('src/checkout.ts', "export function checkout() {\n  return 'sent';\n}\n");
+
+    const result = await run(['impact'], { cwd: repo.path });
 
     assert.ok(!result.stdout.includes(ESC));
   });

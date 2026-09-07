@@ -7,10 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Stages 2 and 3: Git change detection and codebase analysis.
+Stages 2, 3 and 4: Git change detection, codebase analysis and impact analysis.
 
 ### Added
 
+- `verify impact [path]` command that combines the Git change set with the
+  codebase analysis and walks the dependency graph backwards from what changed,
+  with `--json` for the full result.
+- Direct and indirect affected files, affected tests, React components and API
+  routes, each carrying the relationship that selected it.
+- Declaration-level change detection: diff hunks are matched against the line
+  ranges of declarations, so a change reports the functions, classes and methods
+  it actually touched.
+- `--depth N` to configure how many hops the search follows, with the report
+  saying when the limit stopped it short.
+- Deleted and renamed files followed through the import specifiers that stopped
+  resolving because of them.
+- Typed models (`ImpactAnalysis`, `ChangedFile`, `AffectedFile`, `ImpactReason`)
+  exported for programmatic use.
 - `verify analyze [path]` command that parses every JavaScript and TypeScript
   file under a directory and reports what it finds, with `--json` for the full
   inventory.
@@ -36,6 +50,11 @@ Stages 2 and 3: Git change detection and codebase analysis.
   similarity scores and binary-content detection.
 - Typed models (`ChangeSet`, `FileChange`, `DiffHunk`, `GitHead`) and their
   parsers exported for programmatic use, with an injectable `git` runner.
+
+### Changed
+
+- `CodeSymbol` gained an `endLine`, which is what lets a changed line be matched
+  to the declaration containing it.
 
 ### Dependencies
 

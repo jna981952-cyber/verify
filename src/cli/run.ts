@@ -1,18 +1,22 @@
 import { analyzeCodebase } from '../core/analysis/analyze.js';
 import { requireChanges } from '../core/git/changes.js';
+import { analyzeImpact } from '../core/impact/impact.js';
 import { createGitRunner, type GitRunner } from '../core/git/runner.js';
 import { inspectProject } from '../core/project.js';
 import {
   createAnalysisReport,
   createChangesReport,
+  createImpactReport,
   createReport,
   type AnalysisReport,
   type ChangesReport,
+  type ImpactReport,
 } from '../core/report.js';
 import { resolveTarget, type Target } from '../core/target.js';
 import {
   formatAnalysisReport,
   formatChangesReport,
+  formatImpactReport,
   formatReport,
   type FormatOptions,
 } from '../reporters/index.js';
@@ -20,7 +24,7 @@ import { createPalette, shouldUseColor, type Palette } from '../utils/color.js';
 import { ExitCode, isVerifyError, toErrorMessage } from '../utils/errors.js';
 import { createLogger, type Logger } from '../utils/logger.js';
 import { TOOL_NAME } from '../version.js';
-import { parseCliArgs, type CliMode } from './args.js';
+import { parseCliArgs, type CliArgs } from './args.js';
 import { formatHelp, formatUsageHint, formatVersion } from './help.js';
 
 /**
@@ -81,20 +85,37 @@ async function buildAnalysisReport(target: Target): Promise<AnalysisReport> {
   return createAnalysisReport(target, await analyzeCodebase(target.path));
 }
 
+async function buildImpactReport(
+  target: Target,
+  context: CliContext,
+  depth: number | null,
+): Promise<ImpactReport> {
+  const impact = await analyzeImpact(target.path, {
+    runner: context.gitRunner,
+    ...(depth === null ? {} : { depth }),
+  });
+  return createImpactReport(target, impact);
+}
+
 /** Runs the command the invocation asked for and returns its rendered report. */
 async function renderCommand(
-  mode: Exclude<CliMode, 'help' | 'version'>,
+  args: CliArgs,
   target: Target,
   context: CliContext,
   format: FormatOptions,
 ): Promise<string> {
-  switch (mode) {
+  switch (args.mode) {
     case 'changes':
       return formatChangesReport(await buildChangesReport(target, context), format);
     case 'analyze':
       return formatAnalysisReport(await buildAnalysisReport(target), format);
+    case 'impact':
+      return formatImpactReport(await buildImpactReport(target, context, args.depth), format);
     case 'inspect':
       return formatReport(createReport(target, await inspectProject(target)), format);
+    case 'help':
+    case 'version':
+      return '';
   }
 }
 
@@ -137,7 +158,7 @@ export async function runCli(
     const format: FormatOptions = { format: args.json ? 'json' : 'text', palette };
     const target = await resolveTarget(args.target, context.cwd);
 
-    logger.out(await renderCommand(args.mode, target, context, format));
+    logger.out(await renderCommand(args, target, context, format));
     return ExitCode.Success;
   } catch (error) {
     return reportError(error, logger, palette);

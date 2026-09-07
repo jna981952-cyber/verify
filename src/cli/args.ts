@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { UsageError, toErrorMessage } from '../utils/errors.js';
 
 /** Subcommands the CLI understands. */
-export const COMMANDS = ['changes', 'analyze'] as const;
+export const COMMANDS = ['changes', 'analyze', 'impact'] as const;
 
 /** Union of the recognised subcommands. */
 export type CliCommand = (typeof COMMANDS)[number];
@@ -20,6 +20,8 @@ export interface CliArgs {
   readonly json: boolean;
   /** Suppress ANSI colour regardless of terminal support. */
   readonly noColor: boolean;
+  /** Hops to follow when tracing impact, or `null` to use the default. */
+  readonly depth: number | null;
 }
 
 /** Directory inspected when the user does not pass one. */
@@ -30,7 +32,29 @@ const OPTIONS = {
   version: { type: 'boolean', short: 'v', default: false },
   json: { type: 'boolean', default: false },
   'no-color': { type: 'boolean', default: false },
+  depth: { type: 'string' },
 } as const;
+
+/**
+ * Reads `--depth`, which must be a whole number of hops.
+ *
+ * The digits are matched rather than the value being coerced: `Number` accepts
+ * an empty string, hexadecimal and surrounding whitespace, none of which anyone
+ * typing a depth meant.
+ *
+ * @throws {UsageError} If the value is not a non-negative whole number.
+ */
+function parseDepth(value: string | undefined): number | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (!/^\d+$/.test(value)) {
+    throw new UsageError(`--depth must be a whole number of hops, but received: ${value}`);
+  }
+
+  return Number(value);
+}
 
 function isCommand(value: string): value is CliCommand {
   return (COMMANDS as readonly string[]).includes(value);
@@ -83,7 +107,7 @@ function resolveMode(help: boolean, version: boolean, command: CliCommand | null
  * @throws {UsageError} On unknown options or too many positional paths.
  */
 export function parseCliArgs(argv: readonly string[]): CliArgs {
-  let values: Partial<Record<keyof typeof OPTIONS, boolean>>;
+  let values: { readonly [K in keyof typeof OPTIONS]?: boolean | string };
   let positionals: string[];
 
   try {
@@ -105,9 +129,10 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
   }
 
   return {
-    mode: resolveMode(values.help ?? false, values.version ?? false, command),
+    mode: resolveMode(values.help === true, values.version === true, command),
     target,
-    json: values.json ?? false,
-    noColor: values['no-color'] ?? false,
+    json: values.json === true,
+    noColor: values['no-color'] === true,
+    depth: parseDepth(typeof values.depth === 'string' ? values.depth : undefined),
   };
 }

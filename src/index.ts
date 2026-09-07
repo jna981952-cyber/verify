@@ -102,6 +102,30 @@ export {
   type GitRunner,
   type StatusEntry,
 } from './core/git/index.js';
+export {
+  analyzeImpact,
+  buildIncoming,
+  DEFAULT_IMPACT_DEPTH,
+  describeChange,
+  IMPACT_RELATIONS,
+  rebasePath,
+  symbolsCovering,
+  SYMBOL_PRECISIONS,
+  touchedLines,
+  traverseImpact,
+  type AffectedComponent,
+  type AffectedFile,
+  type AffectedRoute,
+  type AffectedTest,
+  type ChangedFile,
+  type ChangedSymbol,
+  type ImpactAnalysis,
+  type ImpactOptions,
+  type ImpactReason,
+  type ImpactRelation,
+  type ImpactSummary,
+  type SymbolPrecision,
+} from './core/impact/index.js';
 export { readManifest, type Manifest } from './core/manifest.js';
 export {
   inspectProject,
@@ -112,9 +136,11 @@ export {
 export {
   createAnalysisReport,
   createChangesReport,
+  createImpactReport,
   createReport,
   type AnalysisReport,
   type ChangesReport,
+  type ImpactReport,
   type Report,
   type ToolInfo,
 } from './core/report.js';
@@ -122,6 +148,7 @@ export { resolveTarget, resolveTargetPath, type Target } from './core/target.js'
 export {
   formatAnalysisReport,
   formatChangesReport,
+  formatImpactReport,
   formatReport,
   REPORT_FORMATS,
   type FormatOptions,

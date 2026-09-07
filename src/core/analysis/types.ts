@@ -45,7 +45,16 @@ export interface CodeSymbol {
   readonly exported: boolean;
   /** Enclosing class for a method, `null` for a top-level declaration. */
   readonly container: string | null;
+  /** Where the declaration starts. */
   readonly location: SourceLocation;
+  /**
+   * Last line the declaration spans, 1-based and inclusive.
+   *
+   * Together with {@link location} this gives the range a changed line can be
+   * tested against, which is what lets impact analysis name the declarations a
+   * diff actually touched instead of guessing from the file alone.
+   */
+  readonly endLine: number;
 }
 
 /** How a module brings another module in. */

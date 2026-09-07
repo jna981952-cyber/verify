@@ -11,6 +11,7 @@ describe('parseCliArgs', () => {
       target: DEFAULT_TARGET,
       json: false,
       noColor: false,
+      depth: null,
     });
   });
 
@@ -66,6 +67,7 @@ describe('parseCliArgs', () => {
       target: DEFAULT_TARGET,
       json: false,
       noColor: false,
+      depth: null,
     });
   });
 
@@ -117,6 +119,7 @@ describe('parseCliArgs', () => {
       target: DEFAULT_TARGET,
       json: false,
       noColor: false,
+      depth: null,
     });
   });
 
@@ -126,6 +129,46 @@ describe('parseCliArgs', () => {
     assert.equal(args.mode, 'analyze');
     assert.equal(args.target, './src');
     assert.equal(args.json, true);
+  });
+
+  it('recognises the impact command', () => {
+    assert.deepEqual(parseCliArgs(['impact']), {
+      mode: 'impact',
+      target: DEFAULT_TARGET,
+      json: false,
+      noColor: false,
+      depth: null,
+    });
+  });
+
+  it('reads the depth option', () => {
+    assert.equal(parseCliArgs(['impact', '--depth', '1']).depth, 1);
+    assert.equal(parseCliArgs(['impact', '--depth', '0']).depth, 0);
+  });
+
+  it('rejects a depth that is not a whole number of hops', () => {
+    for (const value of ['x', '1.5', '', '0x2', ' 1']) {
+      assert.throws(
+        () => parseCliArgs(['impact', '--depth', value]),
+        (error: unknown) => {
+          assert.ok(error instanceof UsageError);
+          assert.match(error.message, /--depth must be a whole number/);
+          return true;
+        },
+        `--depth ${value} should be rejected`,
+      );
+    }
+  });
+
+  it('rejects a negative depth in either spelling', () => {
+    // `--depth -1` is rejected by the argument parser itself, which reads the
+    // leading dash as another option; `--depth=-1` reaches the depth check.
+    assert.throws(() => parseCliArgs(['impact', '--depth', '-1']), UsageError);
+    assert.throws(() => parseCliArgs(['impact', '--depth=-1']), UsageError);
+  });
+
+  it('leaves the depth unset when it is not given', () => {
+    assert.equal(parseCliArgs(['.']).depth, null);
   });
 
   it('rejects more than one path after analyze', () => {

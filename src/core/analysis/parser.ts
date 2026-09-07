@@ -92,3 +92,16 @@ export function locationOf(
   const { line, character } = source.getLineAndCharacterOfPosition(node.getStart(source));
   return { line: line + 1, column: character + 1 };
 }
+
+/** The lines a node covers: where it starts, and the last line it reaches. */
+export interface NodeSpan {
+  readonly location: { readonly line: number; readonly column: number };
+  readonly endLine: number;
+}
+
+/** Measures the range of lines a node occupies. */
+export function spanOf(source: ts.SourceFile, node: ts.Node): NodeSpan {
+  const location = locationOf(source, node);
+  const { line } = source.getLineAndCharacterOfPosition(node.getEnd());
+  return { location, endLine: Math.max(line + 1, location.line) };
+}
