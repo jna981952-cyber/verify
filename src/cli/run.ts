@@ -1,7 +1,9 @@
+import { requireChanges } from '../core/git/changes.js';
+import { createGitRunner, type GitRunner } from '../core/git/runner.js';
 import { inspectProject } from '../core/project.js';
-import { createReport } from '../core/report.js';
-import { resolveTarget } from '../core/target.js';
-import { formatReport } from '../reporters/index.js';
+import { createChangesReport, createReport, type ChangesReport } from '../core/report.js';
+import { resolveTarget, type Target } from '../core/target.js';
+import { formatChangesReport, formatReport, type FormatOptions } from '../reporters/index.js';
 import { createPalette, shouldUseColor, type Palette } from '../utils/color.js';
 import { ExitCode, isVerifyError, toErrorMessage } from '../utils/errors.js';
 import { createLogger, type Logger } from '../utils/logger.js';
@@ -24,6 +26,8 @@ export interface CliContext {
   readonly logger: Logger;
   /** Whether standard output is an interactive terminal. */
   readonly isTTY: boolean;
+  /** How `git` is invoked; replaced by the tests. */
+  readonly gitRunner: GitRunner;
 }
 
 /**
@@ -41,6 +45,7 @@ export function createDefaultContext(): CliContext {
     env: process.env,
     logger: createLogger({ stdout: process.stdout, stderr: process.stderr }),
     isTTY: detectTTY(process.stdout),
+    gitRunner: createGitRunner(),
   };
 }
 
@@ -53,6 +58,11 @@ function reportError(error: unknown, logger: Logger, palette: Palette): ExitCode
   }
 
   return exitCode;
+}
+
+async function buildChangesReport(target: Target, context: CliContext): Promise<ChangesReport> {
+  const changes = await requireChanges(target.path, { runner: context.gitRunner });
+  return createChangesReport(target, changes);
 }
 
 /**
@@ -91,11 +101,14 @@ export async function runCli(
       return ExitCode.Success;
     }
 
+    const format: FormatOptions = { format: args.json ? 'json' : 'text', palette };
     const target = await resolveTarget(args.target, context.cwd);
-    const project = await inspectProject(target);
-    const report = createReport(target, project);
 
-    logger.out(formatReport(report, { format: args.json ? 'json' : 'text', palette }));
+    logger.out(
+      args.mode === 'changes'
+        ? formatChangesReport(await buildChangesReport(target, context), format)
+        : formatReport(createReport(target, await inspectProject(target)), format),
+    );
     return ExitCode.Success;
   } catch (error) {
     return reportError(error, logger, palette);

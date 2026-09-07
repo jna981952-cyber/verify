@@ -59,4 +59,55 @@ describe('parseCliArgs', () => {
   it('rejects a blank target', () => {
     assert.throws(() => parseCliArgs(['   ']), UsageError);
   });
+
+  it('recognises the changes command', () => {
+    assert.deepEqual(parseCliArgs(['changes']), {
+      mode: 'changes',
+      target: DEFAULT_TARGET,
+      json: false,
+      noColor: false,
+    });
+  });
+
+  it('reads a path and flags after the changes command', () => {
+    const args = parseCliArgs(['changes', './packages/api', '--json']);
+
+    assert.equal(args.mode, 'changes');
+    assert.equal(args.target, './packages/api');
+    assert.equal(args.json, true);
+  });
+
+  it('still treats a leading path as the inspection target', () => {
+    const args = parseCliArgs(['.']);
+
+    assert.equal(args.mode, 'inspect');
+    assert.equal(args.target, '.');
+  });
+
+  it('lets help and version win over a command', () => {
+    assert.equal(parseCliArgs(['changes', '--help']).mode, 'help');
+    assert.equal(parseCliArgs(['changes', '--version']).mode, 'version');
+  });
+
+  it('treats a spelled-out path as a path even when it names a command', () => {
+    const args = parseCliArgs(['./changes']);
+
+    assert.equal(args.mode, 'inspect');
+    assert.equal(args.target, './changes');
+  });
+
+  it('rejects more than one path after a command', () => {
+    assert.throws(
+      () => parseCliArgs(['changes', 'one', 'two']),
+      (error: unknown) => {
+        assert.ok(error instanceof UsageError);
+        assert.match(error.message, /at most one path for `changes`/);
+        return true;
+      },
+    );
+  });
+
+  it('rejects an unknown command as a second path', () => {
+    assert.throws(() => parseCliArgs(['.', 'nonsense']), UsageError);
+  });
 });

@@ -1,6 +1,13 @@
 import { TOOL_NAME, VERSION } from '../version.js';
+import { type ChangeSet } from './git/types.js';
 import { type ProjectInfo } from './project.js';
 import { type Target } from './target.js';
+
+/** Identifies the build that produced a report. */
+export interface ToolInfo {
+  readonly name: string;
+  readonly version: string;
+}
 
 /**
  * The result of a single `verify` run.
@@ -9,10 +16,7 @@ import { type Target } from './target.js';
  * so it doubles as the machine-readable contract of the CLI.
  */
 export interface Report {
-  readonly tool: {
-    readonly name: string;
-    readonly version: string;
-  };
+  readonly tool: ToolInfo;
   /** Absolute path that was inspected. */
   readonly target: string;
   readonly project: ProjectInfo;
@@ -24,5 +28,27 @@ export function createReport(target: Target, project: ProjectInfo): Report {
     tool: { name: TOOL_NAME, version: VERSION },
     target: target.path,
     project,
+  };
+}
+
+/**
+ * The result of a single `verify changes` run.
+ *
+ * Wrapping the change set in the same envelope as {@link Report} keeps both
+ * `--json` payloads recognisable as output from the same tool.
+ */
+export interface ChangesReport {
+  readonly tool: ToolInfo;
+  /** Absolute path the command was pointed at. */
+  readonly target: string;
+  readonly changes: ChangeSet;
+}
+
+/** Builds the report for a detected set of changes. */
+export function createChangesReport(target: Target, changes: ChangeSet): ChangesReport {
+  return {
+    tool: { name: TOOL_NAME, version: VERSION },
+    target: target.path,
+    changes,
   };
 }

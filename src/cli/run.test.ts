@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, describe, it } from 'node:test';
 
+import { GitUnavailableError, type GitRunner } from '../core/git/runner.js';
 import { createFixture, packageJson, type Fixture } from '../test-helpers/fixtures.js';
+import { createGitFixture } from '../test-helpers/git.js';
 import { createMemoryLogger } from '../utils/logger.js';
 import { VERSION } from '../version.js';
 import { runCli } from './run.js';
@@ -16,7 +18,7 @@ interface RunResult {
 
 async function run(
   argv: readonly string[],
-  options: { cwd: string; env?: Readonly<Record<string, string>> },
+  options: { cwd: string; env?: Readonly<Record<string, string>>; gitRunner?: GitRunner },
 ): Promise<RunResult> {
   const logger = createMemoryLogger();
   const exitCode = await runCli(argv, {
@@ -24,6 +26,7 @@ async function run(
     env: options.env ?? {},
     logger,
     isTTY: false,
+    ...(options.gitRunner === undefined ? {} : { gitRunner: options.gitRunner }),
   });
 
   return { exitCode, stdout: logger.stdout, stderr: logger.stderr };
@@ -135,4 +138,127 @@ describe('runCli', () => {
     assert.ok(coloured.stdout.includes(ESC));
     assert.ok(!plain.stdout.includes(ESC));
   });
+});
+
+describe('runCli changes', () => {
+  const cleanups: (() => Promise<void>)[] = [];
+
+  after(async () => {
+    await Promise.all(cleanups.map((cleanup) => cleanup()));
+  });
+
+  /** Creates a repository whose first commit holds `files`. */
+  async function repository(files: Readonly<Record<string, string>> = {}) {
+    const created = await createGitFixture(files);
+    cleanups.push(created.cleanup.bind(created));
+    await created.commit('initial');
+    return created;
+  }
+
+  it('summarises the changes in the working directory', async () => {
+    const repo = await repository({ 'src/cart.ts': 'one\n', 'src/checkout.ts': 'one\n' });
+    await repo.write('src/cart.ts', 'two\n');
+    await repo.write('src/checkout.ts', 'two\n');
+    await repo.write('tests/checkout.test.ts', 'test\n');
+    await repo.git('add', 'tests/checkout.test.ts');
+
+    const result = await run(['changes'], { cwd: repo.path });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.match(
+      result.stdout,
+      /Changed files:\n\n {2}M src\/cart\.ts\n {2}M src\/checkout\.ts\n {2}A tests\/checkout\.test\.ts\n\nSummary:\n {2}2 modified\n {2}1 added\n {2}0 deleted\n {2}0 renamed/,
+    );
+  });
+
+  it('accepts a path after the command', async () => {
+    const repo = await repository({ 'src/cart.ts': 'one\n' });
+    await repo.write('src/cart.ts', 'two\n');
+
+    const result = await run(['changes', repo.path], { cwd: await fixtureDirectory() });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /M src\/cart\.ts/);
+  });
+
+  it('reports a clean repository', async () => {
+    const repo = await repository({ 'src/cart.ts': 'one\n' });
+
+    const result = await run(['changes'], { cwd: repo.path });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /No changes\./);
+  });
+
+  it('emits machine-readable JSON', async () => {
+    const repo = await repository({ 'src/cart.ts': 'one\ntwo\n' });
+    await repo.write('src/cart.ts', 'one\nTWO\n');
+
+    const result = await run(['changes', '--json'], { cwd: repo.path });
+    const payload = JSON.parse(result.stdout) as {
+      tool: { name: string };
+      target: string;
+      changes: {
+        head: { branch: string | null };
+        files: { path: string; kind: string; hunks: { addedLines: number[] }[] }[];
+        summary: { modified: number; total: number };
+      };
+    };
+
+    const changed = payload.changes.files[0];
+    assert.ok(changed !== undefined);
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(payload.tool.name, 'verify');
+    assert.equal(payload.target, repo.path);
+    assert.equal(payload.changes.head.branch, 'main');
+    assert.equal(changed.path, 'src/cart.ts');
+    assert.equal(changed.kind, 'modified');
+    assert.deepEqual(changed.hunks[0]?.addedLines, [2]);
+    assert.equal(payload.changes.summary.modified, 1);
+    assert.equal(payload.changes.summary.total, 1);
+  });
+
+  it('fails with the usage exit code outside a repository', async () => {
+    const result = await run(['changes'], { cwd: await fixtureDirectory() });
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Not a Git repository/);
+    assert.match(result.stderr, /--help/);
+  });
+
+  it('fails with the usage exit code when the path does not exist', async () => {
+    const result = await run(['changes', './missing'], { cwd: await fixtureDirectory() });
+
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderr, /Cannot read target path/);
+  });
+
+  it('reports an internal failure when git cannot be run', async () => {
+    const failing: GitRunner = () =>
+      Promise.reject(new GitUnavailableError('Could not run git. Is it installed and on PATH?'));
+
+    const result = await run(['changes'], { cwd: await fixtureDirectory(), gitRunner: failing });
+
+    assert.equal(result.exitCode, 3);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Could not run git/);
+  });
+
+  it('writes plain text when the output is not a terminal', async () => {
+    const repo = await repository({ 'src/cart.ts': 'one\n' });
+    await repo.write('src/cart.ts', 'two\n');
+
+    const result = await run(['changes'], { cwd: repo.path });
+
+    assert.ok(!result.stdout.includes(ESC));
+  });
+
+  async function fixtureDirectory(): Promise<string> {
+    const created = await createFixture();
+    cleanups.push(created.cleanup.bind(created));
+    return created.path;
+  }
 });

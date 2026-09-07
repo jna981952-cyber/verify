@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Stage 2: Git change detection.
+
+### Added
+
+- `verify changes [path]` command that reports the Git changes in the target's
+  repository, with `--json` for machine-readable output.
+- Detection of the repository root, the current branch and commit, a detached
+  `HEAD`, and a repository with no commits yet.
+- Classification of every changed path as added, modified, deleted, renamed,
+  untracked or unmerged, and as staged, unstaged or both.
+- Diff hunk parsing: changed line numbers, per-file line totals, rename
+  similarity scores and binary-content detection.
+- Typed models (`ChangeSet`, `FileChange`, `DiffHunk`, `GitHead`) and their
+  parsers exported for programmatic use, with an injectable `git` runner.
+
 ## [0.1.0] - 2026-09-07
 
 Stage 1: the CLI foundation.

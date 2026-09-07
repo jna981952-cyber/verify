@@ -3,7 +3,11 @@ import { TOOL_NAME, VERSION } from '../version.js';
 const HELP_TEXT = `${TOOL_NAME} — checks code changes, finds what might break, and tests it before you ship.
 
 Usage
-  ${TOOL_NAME} [path] [options]
+  ${TOOL_NAME} [command] [path] [options]
+
+Commands
+  (none)           Report project context for the path
+  changes          List the Git changes in the path's repository
 
 Arguments
   path             Directory to inspect (default: ".")
@@ -22,7 +26,9 @@ Exit codes
 
 Examples
   ${TOOL_NAME} .
-  ${TOOL_NAME} ./packages/api --json`;
+  ${TOOL_NAME} ./packages/api --json
+  ${TOOL_NAME} changes
+  ${TOOL_NAME} changes ./packages/api --json`;
 
 /** Returns the full `--help` output. */
 export function formatHelp(): string {

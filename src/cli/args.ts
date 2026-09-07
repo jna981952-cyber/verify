@@ -2,8 +2,14 @@ import { parseArgs } from 'node:util';
 
 import { UsageError, toErrorMessage } from '../utils/errors.js';
 
+/** Subcommands the CLI understands. */
+export const COMMANDS = ['changes'] as const;
+
+/** Union of the recognised subcommands. */
+export type CliCommand = (typeof COMMANDS)[number];
+
 /** What the invocation asked the CLI to do. */
-export type CliMode = 'help' | 'version' | 'inspect';
+export type CliMode = 'help' | 'version' | 'inspect' | CliCommand;
 
 /** Normalised view of the command line. */
 export interface CliArgs {
@@ -26,14 +32,46 @@ const OPTIONS = {
   'no-color': { type: 'boolean', default: false },
 } as const;
 
-function resolveMode(help: boolean, version: boolean): CliMode {
+function isCommand(value: string): value is CliCommand {
+  return (COMMANDS as readonly string[]).includes(value);
+}
+
+/**
+ * Splits the positional arguments into a subcommand and a path.
+ *
+ * Without a leading subcommand the first positional is the path, which is what
+ * keeps plain `verify .` working exactly as it did before subcommands existed.
+ * A directory genuinely named after a command can still be reached by spelling
+ * the path out, as in `verify ./changes`.
+ *
+ * @throws {UsageError} If more paths were given than the invocation accepts.
+ */
+function splitPositionals(positionals: readonly string[]): {
+  command: CliCommand | null;
+  target: string;
+} {
+  const first = positionals[0];
+  const command = first !== undefined && isCommand(first) ? first : null;
+  const paths = command === null ? positionals : positionals.slice(1);
+
+  if (paths.length > 1) {
+    const context = command === null ? '' : ` for \`${command}\``;
+    throw new UsageError(
+      `Expected at most one path${context} but received ${String(paths.length)}: ${paths.join(', ')}`,
+    );
+  }
+
+  return { command, target: paths[0] ?? DEFAULT_TARGET };
+}
+
+function resolveMode(help: boolean, version: boolean, command: CliCommand | null): CliMode {
   if (help) {
     return 'help';
   }
   if (version) {
     return 'version';
   }
-  return 'inspect';
+  return command ?? 'inspect';
 }
 
 /**
@@ -42,7 +80,7 @@ function resolveMode(help: boolean, version: boolean): CliMode {
  * Uses Node's built-in `parseArgs` so the CLI needs no argument-parsing
  * dependency; unknown flags surface as {@link UsageError}.
  *
- * @throws {UsageError} On unknown options or more than one positional path.
+ * @throws {UsageError} On unknown options or too many positional paths.
  */
 export function parseCliArgs(argv: readonly string[]): CliArgs {
   let values: Partial<Record<keyof typeof OPTIONS, boolean>>;
@@ -61,19 +99,13 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
     throw new UsageError(toErrorMessage(cause), { cause });
   }
 
-  if (positionals.length > 1) {
-    throw new UsageError(
-      `Expected at most one path but received ${String(positionals.length)}: ${positionals.join(', ')}`,
-    );
-  }
-
-  const target = positionals[0] ?? DEFAULT_TARGET;
+  const { command, target } = splitPositionals(positionals);
   if (target.trim() === '') {
     throw new UsageError('The target path must not be empty.');
   }
 
   return {
-    mode: resolveMode(values.help ?? false, values.version ?? false),
+    mode: resolveMode(values.help ?? false, values.version ?? false, command),
     target,
     json: values.json ?? false,
     noColor: values['no-color'] ?? false,
