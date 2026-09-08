@@ -10,6 +10,7 @@ Commands
   changes          List the Git changes in the path's repository
   analyze          Inventory the JavaScript and TypeScript source in the path
   impact           Trace what the current Git changes reach
+  tests            Discover and run the project's tests
 
 Arguments
   path             Directory to inspect (default: ".")
@@ -20,6 +21,10 @@ Options
       --json       Print the report as JSON
       --no-color   Disable coloured output
       --depth N    Hops the impact command follows (default: 3)
+      --impacted   Run only the tests the current changes reach
+      --test NAME  Run only tests whose name matches NAME
+      --timeout MS Stop a test run after MS milliseconds (default: 120000)
+      --list       Discover and select tests without running them
 
 Exit codes
   0  Success
@@ -35,7 +40,10 @@ Examples
   ${TOOL_NAME} analyze ./src
   ${TOOL_NAME} analyze --json
   ${TOOL_NAME} impact
-  ${TOOL_NAME} impact --depth 1 --json`;
+  ${TOOL_NAME} impact --depth 1 --json
+  ${TOOL_NAME} tests
+  ${TOOL_NAME} tests --impacted
+  ${TOOL_NAME} tests --test "adds items" --json`;
 
 /** Returns the full `--help` output. */
 export function formatHelp(): string {

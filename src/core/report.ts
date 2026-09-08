@@ -2,6 +2,7 @@ import { TOOL_NAME, VERSION } from '../version.js';
 import { type CodebaseAnalysis } from './analysis/types.js';
 import { type ChangeSet } from './git/types.js';
 import { type ImpactAnalysis } from './impact/types.js';
+import { type TestReport } from './testing/types.js';
 import { type ProjectInfo } from './project.js';
 import { type Target } from './target.js';
 
@@ -96,5 +97,27 @@ export function createImpactReport(target: Target, impact: ImpactAnalysis): Impa
     tool: { name: TOOL_NAME, version: VERSION },
     target: target.path,
     impact,
+  };
+}
+
+/**
+ * The result of a single `verify tests` run.
+ *
+ * Uses the same envelope as the other reports so every `--json` payload is
+ * recognisable as output from the same tool.
+ */
+export interface TestsReport {
+  readonly tool: ToolInfo;
+  /** Absolute path the command was pointed at. */
+  readonly target: string;
+  readonly tests: TestReport;
+}
+
+/** Builds the report for a test discovery and run. */
+export function createTestsReport(target: Target, tests: TestReport): TestsReport {
+  return {
+    tool: { name: TOOL_NAME, version: VERSION },
+    target: target.path,
+    tests,
   };
 }

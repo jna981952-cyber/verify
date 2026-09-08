@@ -7,9 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Stages 2, 3 and 4: Git change detection, codebase analysis and impact analysis.
+Stages 2 to 5: Git change detection, codebase analysis, impact analysis and the
+test engine.
 
 ### Added
+
+- `verify tests [path]` command that discovers a project's tests and runs them,
+  with `--json` for the full result.
+- Support for Vitest and Jest, recognised from a dependency, a config file or a
+  manifest field, and located in the project's own `node_modules`.
+- Static discovery of test files and the tests inside them, which works whether
+  or not a runner is installed; `--list` stops there.
+- `--impacted` to run only the tests the current changes reach, with the Stage 4
+  reason carried through for each selected file.
+- `--test NAME` to run a single test by name.
+- `--timeout MS` and safe termination: a stopped run signals the runner's whole
+  process group and kills anything still running two seconds later.
+- A common `TestRun` model — statuses, failures with stacks, durations, exit
+  code, captured output — independent of which runner produced it.
+- An injectable process layer, so the engine is exercised against stand-in
+  runners rather than against whatever happens to be installed.
 
 - `verify impact [path]` command that combines the Git change set with the
   codebase analysis and walks the dependency graph backwards from what changed,
@@ -55,6 +72,8 @@ Stages 2, 3 and 4: Git change detection, codebase analysis and impact analysis.
 
 - `CodeSymbol` gained an `endLine`, which is what lets a changed line be matched
   to the declaration containing it.
+- Exit code `1`, reserved since the first release, now has a meaning: a test did
+  not pass, a run could not be completed, or a configured runner is missing.
 
 ### Dependencies
 

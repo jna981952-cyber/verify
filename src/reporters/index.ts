@@ -3,11 +3,13 @@ import {
   type ChangesReport,
   type ImpactReport,
   type Report,
+  type TestsReport,
 } from '../core/report.js';
 import { type Palette } from '../utils/color.js';
 import { formatAnalysisJson, formatAnalysisText } from './analysis.js';
 import { formatChangesJson, formatChangesText } from './changes.js';
 import { formatImpactJson, formatImpactText } from './impact.js';
+import { formatTestsJson, formatTestsText } from './tests.js';
 import { formatJsonReport } from './json.js';
 import { formatTextReport } from './text.js';
 
@@ -65,8 +67,19 @@ export function formatImpactReport(report: ImpactReport, options: FormatOptions)
   }
 }
 
+/** Renders a test report in the requested format. */
+export function formatTestsReport(report: TestsReport, options: FormatOptions): string {
+  switch (options.format) {
+    case 'json':
+      return formatTestsJson(report);
+    case 'text':
+      return formatTestsText(report, options.palette);
+  }
+}
+
 export { formatAnalysisJson, formatAnalysisText } from './analysis.js';
 export { describeHead, formatChangesJson, formatChangesText } from './changes.js';
 export { formatImpactJson, formatImpactText } from './impact.js';
 export { formatJsonReport } from './json.js';
+export { formatDuration, formatTestsJson, formatTestsText } from './tests.js';
 export { formatTextReport } from './text.js';

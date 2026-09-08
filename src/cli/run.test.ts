@@ -4,6 +4,12 @@ import { after, describe, it } from 'node:test';
 import { GitUnavailableError, type GitRunner } from '../core/git/runner.js';
 import { createFixture, packageJson, type Fixture } from '../test-helpers/fixtures.js';
 import { createGitFixture, type GitFixture } from '../test-helpers/git.js';
+import {
+  createRunnerProject,
+  runnerResults,
+  type RunnerBehaviour,
+  type RunnerProject,
+} from '../test-helpers/runner.js';
 import { createMemoryLogger } from '../utils/logger.js';
 import { VERSION } from '../version.js';
 import { runCli } from './run.js';
@@ -495,6 +501,216 @@ describe('runCli impact', () => {
     await repo.write('src/checkout.ts', "export function checkout() {\n  return 'sent';\n}\n");
 
     const result = await run(['impact'], { cwd: repo.path });
+
+    assert.ok(!result.stdout.includes(ESC));
+  });
+});
+
+describe('runCli tests', () => {
+  const cleanups: (() => Promise<void>)[] = [];
+
+  after(async () => {
+    await Promise.all(cleanups.map((cleanup) => cleanup()));
+  });
+
+  const files: Readonly<Record<string, string>> = {
+    'src/cart.ts': 'export function total(): number {\n  return 1;\n}\n',
+    'src/cart.test.ts':
+      "import { total } from './cart.js';\ndescribe('cart', () => {\n  it('adds', () => total());\n  it('subtracts', () => total());\n});\n",
+    'src/other.test.ts': "it('unrelated', () => {});\n",
+  };
+
+  const passing = runnerResults([
+    {
+      name: 'src/cart.test.ts',
+      startTime: 100,
+      endTime: 1520,
+      tests: [
+        { title: 'adds', status: 'passed', ancestorTitles: ['cart'], duration: 3 },
+        { title: 'subtracts', status: 'passed', ancestorTitles: ['cart'], duration: 4 },
+      ],
+    },
+    { name: 'src/other.test.ts', tests: [{ title: 'unrelated', status: 'passed', duration: 1 }] },
+  ]);
+
+  async function project(behaviour: RunnerBehaviour | null): Promise<RunnerProject> {
+    const created = await createRunnerProject({ framework: 'vitest', files, behaviour });
+    cleanups.push(created.cleanup.bind(created));
+    return created;
+  }
+
+  it('discovers, runs and reports a passing suite', async () => {
+    const created = await project({ results: passing });
+
+    const result = await run(['tests'], { cwd: created.root });
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(result.stderr, '');
+    assert.match(result.stdout, /^Discovered:\n {2}2 test files\n {2}3 tests$/m);
+    assert.match(result.stdout, /^Selected:\n {2}3 tests in 2 files$/m);
+    assert.match(result.stdout, /^Results:\n {2}3 passed$/m);
+    assert.match(result.stdout, /^Duration:\n {2}\d/m);
+    assert.match(result.stdout, /✔ All selected tests passed\./);
+  });
+
+  it('exits with the failure code when a test does not pass', async () => {
+    const created = await project({
+      exitCode: 1,
+      results: runnerResults([
+        {
+          name: 'src/cart.test.ts',
+          tests: [
+            { title: 'adds', status: 'passed', ancestorTitles: ['cart'] },
+            {
+              title: 'subtracts',
+              status: 'failed',
+              ancestorTitles: ['cart'],
+              failureMessages: ['AssertionError: expected 1 to be 2\n    at cart.test.ts:4:24'],
+            },
+          ],
+        },
+      ]),
+    });
+
+    const result = await run(['tests'], { cwd: created.root });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stdout, /^Results:\n {2}1 passed\n {2}1 failed$/m);
+    assert.match(result.stdout, /src\/cart\.test\.ts > cart > subtracts/);
+    assert.match(result.stdout, /AssertionError: expected 1 to be 2/);
+    assert.match(result.stdout, /is not something running it can settle/);
+  });
+
+  it('runs only what the current changes reach', async () => {
+    const repo = await createGitFixture({
+      '.gitignore': 'node_modules/\n',
+      'package.json': `${JSON.stringify({ devDependencies: { vitest: '^1.0.0' } })}\n`,
+      ...files,
+    });
+    cleanups.push(repo.cleanup.bind(repo));
+    await repo.commit('initial');
+    await repo.write('src/cart.ts', 'export function total(): number {\n  return 2;\n}\n');
+
+    const result = await run(['tests', '--impacted', '--list'], { cwd: repo.path });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /^Selected:\n {2}2 tests in 1 file$/m);
+    assert.match(result.stdout, /^Selected because:/m);
+    assert.match(result.stdout, /src\/cart\.test\.ts imports total from src\/cart\.ts/);
+    assert.doesNotMatch(result.stdout, /src\/other\.test\.ts/);
+  });
+
+  it('discovers without running when asked to list', async () => {
+    const created = await project({ results: passing });
+
+    const result = await run(['tests', '--list'], { cwd: created.root });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /^Discovered:/m);
+    assert.doesNotMatch(result.stdout, /^Results:/m);
+    assert.equal(await created.invocation(), null);
+  });
+
+  it('passes a name filter to the runner', async () => {
+    const created = await project({
+      results: runnerResults([
+        {
+          name: 'src/cart.test.ts',
+          tests: [{ title: 'adds', status: 'passed', ancestorTitles: ['cart'] }],
+        },
+      ]),
+    });
+
+    const result = await run(['tests', '--test', 'adds'], { cwd: created.root });
+    const invocation = (await created.invocation()) ?? [];
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /matching "adds"/);
+    assert.ok(invocation.includes('-t'));
+    assert.ok(invocation.includes('adds'));
+  });
+
+  it('stops a run that outstays the timeout it was given', async () => {
+    const created = await project({ delayMs: 10_000, results: passing });
+
+    const result = await run(['tests', '--timeout', '400'], { cwd: created.root });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stdout, /The run was stopped after 400ms\./);
+  });
+
+  it('reports a project with no runner without failing', async () => {
+    const created = await createRunnerProject({
+      framework: 'vitest',
+      files,
+      behaviour: null,
+      manifest: { devDependencies: {} },
+    });
+    cleanups.push(created.cleanup.bind(created));
+
+    const result = await run(['tests'], { cwd: created.root });
+
+    assert.equal(result.exitCode, 0);
+    assert.match(result.stdout, /No test runner was recognised/);
+  });
+
+  it('fails when the runner is configured but not installed', async () => {
+    const created = await project(null);
+
+    const result = await run(['tests'], { cwd: created.root });
+
+    assert.equal(result.exitCode, 1);
+    assert.match(result.stdout, /vitest is configured here but is not installed/);
+  });
+
+  it('emits machine-readable JSON', async () => {
+    const created = await project({ results: passing });
+
+    const result = await run(['tests', '--json'], { cwd: created.root });
+    const payload = JSON.parse(result.stdout) as {
+      tool: { name: string };
+      target: string;
+      tests: {
+        discovery: { detection: { framework: string }; tests: number };
+        selection: { mode: string; tests: number };
+        run: { outcome: string; summary: { passed: number } } | null;
+      };
+    };
+
+    assert.equal(result.exitCode, 0);
+    assert.equal(payload.tool.name, 'verify');
+    assert.equal(payload.target, created.root);
+    assert.equal(payload.tests.discovery.detection.framework, 'vitest');
+    assert.equal(payload.tests.discovery.tests, 3);
+    assert.equal(payload.tests.selection.mode, 'all');
+    assert.ok(payload.tests.run !== null);
+    assert.equal(payload.tests.run.outcome, 'pass');
+    assert.equal(payload.tests.run.summary.passed, 3);
+  });
+
+  it('fails with the usage exit code when the path does not exist', async () => {
+    const created = await project(null);
+
+    const result = await run(['tests', './missing'], { cwd: created.root });
+
+    assert.equal(result.exitCode, 2);
+    assert.equal(result.stdout, '');
+    assert.match(result.stderr, /Cannot read target path/);
+  });
+
+  it('fails with the usage exit code for an unusable timeout', async () => {
+    const created = await project(null);
+
+    const result = await run(['tests', '--timeout', 'ages'], { cwd: created.root });
+
+    assert.equal(result.exitCode, 2);
+    assert.match(result.stderr, /--timeout must be a positive number/);
+  });
+
+  it('writes plain text when the output is not a terminal', async () => {
+    const created = await project({ results: passing });
+
+    const result = await run(['tests'], { cwd: created.root });
 
     assert.ok(!result.stdout.includes(ESC));
   });

@@ -12,6 +12,10 @@ describe('parseCliArgs', () => {
       json: false,
       noColor: false,
       depth: null,
+      impacted: false,
+      test: null,
+      timeout: null,
+      list: false,
     });
   });
 
@@ -68,6 +72,10 @@ describe('parseCliArgs', () => {
       json: false,
       noColor: false,
       depth: null,
+      impacted: false,
+      test: null,
+      timeout: null,
+      list: false,
     });
   });
 
@@ -120,6 +128,10 @@ describe('parseCliArgs', () => {
       json: false,
       noColor: false,
       depth: null,
+      impacted: false,
+      test: null,
+      timeout: null,
+      list: false,
     });
   });
 
@@ -138,6 +150,10 @@ describe('parseCliArgs', () => {
       json: false,
       noColor: false,
       depth: null,
+      impacted: false,
+      test: null,
+      timeout: null,
+      list: false,
     });
   });
 
@@ -169,6 +185,55 @@ describe('parseCliArgs', () => {
 
   it('leaves the depth unset when it is not given', () => {
     assert.equal(parseCliArgs(['.']).depth, null);
+  });
+
+  it('recognises the tests command', () => {
+    assert.equal(parseCliArgs(['tests']).mode, 'tests');
+    assert.equal(parseCliArgs(['tests', './packages/api']).target, './packages/api');
+  });
+
+  it('reads the options the tests command accepts', () => {
+    const args = parseCliArgs([
+      'tests',
+      '--impacted',
+      '--test',
+      'adds items',
+      '--timeout',
+      '5000',
+      '--list',
+    ]);
+
+    assert.equal(args.impacted, true);
+    assert.equal(args.test, 'adds items');
+    assert.equal(args.timeout, 5000);
+    assert.equal(args.list, true);
+  });
+
+  it('leaves the test options unset when they are not given', () => {
+    const args = parseCliArgs(['tests']);
+
+    assert.equal(args.impacted, false);
+    assert.equal(args.test, null);
+    assert.equal(args.timeout, null);
+    assert.equal(args.list, false);
+  });
+
+  it('rejects a timeout that is not a positive number of milliseconds', () => {
+    for (const value of ['0', 'x', '1.5', '', '1e3']) {
+      assert.throws(
+        () => parseCliArgs(['tests', '--timeout', value]),
+        (error: unknown) => {
+          assert.ok(error instanceof UsageError);
+          assert.match(error.message, /--timeout must be a positive number/);
+          return true;
+        },
+        `--timeout ${value} should be rejected`,
+      );
+    }
+  });
+
+  it('accepts a test name that looks like a flag when spelled out', () => {
+    assert.equal(parseCliArgs(['tests', '--test=--weird']).test, '--weird');
   });
 
   it('rejects more than one path after analyze', () => {

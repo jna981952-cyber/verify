@@ -1,6 +1,7 @@
 import { analyzeCodebase } from '../core/analysis/analyze.js';
 import { requireChanges } from '../core/git/changes.js';
 import { analyzeImpact } from '../core/impact/impact.js';
+import { exitCodeFor, runTests } from '../core/testing/engine.js';
 import { createGitRunner, type GitRunner } from '../core/git/runner.js';
 import { inspectProject } from '../core/project.js';
 import {
@@ -8,6 +9,7 @@ import {
   createChangesReport,
   createImpactReport,
   createReport,
+  createTestsReport,
   type AnalysisReport,
   type ChangesReport,
   type ImpactReport,
@@ -18,6 +20,7 @@ import {
   formatChangesReport,
   formatImpactReport,
   formatReport,
+  formatTestsReport,
   type FormatOptions,
 } from '../reporters/index.js';
 import { createPalette, shouldUseColor, type Palette } from '../utils/color.js';
@@ -97,25 +100,65 @@ async function buildImpactReport(
   return createImpactReport(target, impact);
 }
 
+/** A rendered report together with the exit code it should produce. */
+interface Rendered {
+  readonly output: string;
+  readonly exitCode: ExitCode;
+}
+
+/**
+ * Runs the tests command.
+ *
+ * This is the one command whose exit code depends on what it found: a test that
+ * did not pass is what exit code 1 has been reserved for since the first
+ * release.
+ */
+async function renderTests(
+  args: CliArgs,
+  target: Target,
+  context: CliContext,
+  format: FormatOptions,
+): Promise<Rendered> {
+  const report = await runTests(target.path, {
+    runner: context.gitRunner,
+    mode: args.impacted ? 'impacted' : 'all',
+    pattern: args.test,
+    execute: !args.list,
+    ...(args.depth === null ? {} : { depth: args.depth }),
+    ...(args.timeout === null ? {} : { timeoutMs: args.timeout }),
+  });
+
+  return {
+    output: formatTestsReport(createTestsReport(target, report), format),
+    exitCode: exitCodeFor(report),
+  };
+}
+
 /** Runs the command the invocation asked for and returns its rendered report. */
 async function renderCommand(
   args: CliArgs,
   target: Target,
   context: CliContext,
   format: FormatOptions,
-): Promise<string> {
+): Promise<Rendered> {
+  const succeeds = (output: string): Rendered => ({ output, exitCode: ExitCode.Success });
+
   switch (args.mode) {
     case 'changes':
-      return formatChangesReport(await buildChangesReport(target, context), format);
+      return succeeds(formatChangesReport(await buildChangesReport(target, context), format));
     case 'analyze':
-      return formatAnalysisReport(await buildAnalysisReport(target), format);
+      return succeeds(formatAnalysisReport(await buildAnalysisReport(target), format));
     case 'impact':
-      return formatImpactReport(await buildImpactReport(target, context, args.depth), format);
+      return succeeds(
+        formatImpactReport(await buildImpactReport(target, context, args.depth), format),
+      );
+    case 'tests':
+      return renderTests(args, target, context, format);
     case 'inspect':
-      return formatReport(createReport(target, await inspectProject(target)), format);
+      return succeeds(formatReport(createReport(target, await inspectProject(target)), format));
     case 'help':
     case 'version':
-      return '';
+      return succeeds('');
   }
 }
 
@@ -158,8 +201,9 @@ export async function runCli(
     const format: FormatOptions = { format: args.json ? 'json' : 'text', palette };
     const target = await resolveTarget(args.target, context.cwd);
 
-    logger.out(await renderCommand(args, target, context, format));
-    return ExitCode.Success;
+    const rendered = await renderCommand(args, target, context, format);
+    logger.out(rendered.output);
+    return rendered.exitCode;
   } catch (error) {
     return reportError(error, logger, palette);
   }

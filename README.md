@@ -10,15 +10,17 @@
 
 ## Project status
 
-**Stage 4 — impact analysis.** `verify` now joins the two halves it built
-first: it takes the Git changes from Stage 2, the codebase analysis from
-Stage 3, and walks the dependency graph backwards from what changed to find
-what depends on it — files, tests, React components and API routes — recording
-why each one was selected.
+**Stage 5 — test discovery and execution.** `verify` now runs the tests as
+well as finding them. It recognises Vitest and Jest, discovers the test files
+and the tests inside them by reading the source, and drives the runner the
+project has installed — capturing its output, its exit code, the stack of every
+failure and how long it all took. Given the Stage 4 impact analysis it runs only
+the tests a change actually reaches.
 
-So `verify` can now say what changed, what is there, and what a change reaches.
-It cannot yet run any checks, and it never claims anything about behaviour at
-runtime; that is out of reach of reading source alone.
+So `verify` can now say what changed, what is there, what a change reaches, and
+what the tests make of it. What a failing test _means_ — a broken change, a
+stale test, a flaky one — is not something running it can settle, and nothing
+here claims otherwise.
 
 Everything documented below works today.
 
@@ -239,6 +241,97 @@ It reads source and nothing else, so it does not follow:
 Nothing on those lists is guessed at. A missed relationship is the failure mode
 this is built for; a fabricated one is not.
 
+### `verify tests` — discover and run the tests
+
+```bash
+verify tests
+```
+
+```text
+vitest 3.2.4
+
+Discovered:
+  2 test files
+  3 tests
+
+Selected:
+  3 tests in 2 files
+
+Results:
+  3 passed
+
+Duration:
+  50ms
+
+✔ All selected tests passed.
+```
+
+Vitest and Jest are supported. The runner is found in the project's own
+`node_modules` — never a global install, because a runner outside the
+dependency tree is not the one the tests expect — and is executed through the
+current Node binary rather than a shell, so a path with a space in it is just a
+path.
+
+Discovery is separate from execution and reads the source alone, so
+`verify tests --list` inventories a project whether or not a runner is
+installed.
+
+#### Running only what a change reaches
+
+```bash
+verify tests --impacted
+```
+
+Stage 4 decides the selection, and says why each file was chosen:
+
+```text
+Selected:
+  2 tests in 1 file
+
+Selected because:
+  src/cart.test.ts  src/cart.test.ts imports total from src/cart.ts, and total changed
+```
+
+Tests nothing reached are not run.
+
+#### Running one test
+
+```bash
+verify tests --test "adds items"
+```
+
+The pattern goes to the runner's own `-t` filter, which matches against a
+test's full name.
+
+#### Failures
+
+A failure carries the runner's own message and stack, unedited:
+
+```text
+Failures:
+  src/cart.test.ts > cart > subtracts
+      AssertionError: expected 1 to be 2
+          at Object.<anonymous> (src/cart.test.ts:5:24)
+
+Notes:
+  A failing test means the test did not pass. Whether the test or the code it
+  exercises is wrong is not something running it can settle.
+```
+
+That note is the point: `verify` reports what the runner reported. It does not
+decide that a failing test is a product bug.
+
+#### Timeouts
+
+A run is stopped after two minutes unless `--timeout` says otherwise. Stopping
+signals the runner's whole process group, so its workers go with it, and a
+process that ignores the signal is killed two seconds later. A stopped run is
+reported as such rather than as a pass.
+
+```bash
+verify tests --timeout 30000
+```
+
 ### Commands
 
 | Command   | Description                                                 |
@@ -247,6 +340,7 @@ this is built for; a fabricated one is not.
 | `changes` | List the Git changes in the path's repository.              |
 | `analyze` | Inventory the JavaScript and TypeScript source in the path. |
 | `impact`  | Trace what the current Git changes reach.                   |
+| `tests`   | Discover and run the project's tests.                       |
 
 ### Arguments
 
@@ -260,13 +354,17 @@ command.
 
 ### Options
 
-| Option            | Description                                            |
-| ----------------- | ------------------------------------------------------ |
-| `-h`, `--help`    | Show the help text and exit.                           |
-| `-v`, `--version` | Show the version number and exit.                      |
-| `--json`          | Print the report as JSON.                              |
-| `--no-color`      | Disable coloured output.                               |
-| `--depth N`       | Hops `impact` follows away from a change (default: 3). |
+| Option            | Description                                              |
+| ----------------- | -------------------------------------------------------- |
+| `-h`, `--help`    | Show the help text and exit.                             |
+| `-v`, `--version` | Show the version number and exit.                        |
+| `--json`          | Print the report as JSON.                                |
+| `--no-color`      | Disable coloured output.                                 |
+| `--depth N`       | Hops `impact` follows away from a change (default: 3).   |
+| `--impacted`      | Restrict `tests` to what the current changes reach.      |
+| `--test NAME`     | Restrict `tests` to tests whose name matches NAME.       |
+| `--timeout MS`    | Stop a test run after MS milliseconds (default: 120000). |
+| `--list`          | Discover and select tests without running them.          |
 
 Colour is enabled automatically when standard output is a terminal, and is
 suppressed by `--no-color`, by [`NO_COLOR`](https://no-color.org), or by
@@ -274,12 +372,12 @@ suppressed by `--no-color`, by [`NO_COLOR`](https://no-color.org), or by
 
 ### Exit codes
 
-| Code | Meaning                                                                                      |
-| ---- | -------------------------------------------------------------------------------------------- |
-| `0`  | Success.                                                                                     |
-| `1`  | Verification reported problems. Reserved; unused today.                                      |
-| `2`  | Invalid usage — unknown flag, an unusable path, or a directory that is not a Git repository. |
-| `3`  | Unexpected internal error, including `git` not being installed.                              |
+| Code | Meaning                                                                                                                     |
+| ---- | --------------------------------------------------------------------------------------------------------------------------- |
+| `0`  | Success.                                                                                                                    |
+| `1`  | Verification reported problems: a test did not pass, a run could not be completed, or a configured runner is not installed. |
+| `2`  | Invalid usage — unknown flag, an unusable path, or a directory that is not a Git repository.                                |
+| `3`  | Unexpected internal error, including `git` not being installed.                                                             |
 
 ### JSON output
 
@@ -563,11 +661,22 @@ src/
 │   │   └── types.ts      The typed models everything else speaks in
 │   ├── manifest.ts   Reads package.json
 │   ├── project.ts    Detects package manager, VCS and TypeScript
+│   ├── testing/      Test discovery and execution
+│   │   ├── discover.ts   Reads the test files out of the analysis
+│   │   ├── engine.ts     Composes discovery, selection and the run
+│   │   ├── framework.ts  Recognises Vitest or Jest
+│   │   ├── locate.ts     Finds the installed runner's entry point
+│   │   ├── parse.ts      Reads what a runner reported
+│   │   ├── process.ts    Runs a process, with timeout and termination
+│   │   ├── run.ts        Drives one runner and reads its results
+│   │   ├── select.ts     Chooses which tests to run
+│   │   └── types.ts      The typed models everything else speaks in
 │   ├── report.ts     The report shapes shared by every reporter
 │   └── target.ts     Resolves and validates the target directory
 ├── reporters/        Rendering
 │   ├── analysis.ts   Codebase inventory, human-readable and JSON
 │   ├── impact.ts     Impact report, human-readable and JSON
+│   ├── tests.ts      Test report, human-readable and JSON
 │   ├── changes.ts    Change summary, human-readable and JSON
 │   ├── text.ts       Human-readable summary
 │   └── json.ts       Machine-readable report
@@ -594,6 +703,12 @@ Two rules keep the layers honest:
 - **Every impact carries its reason.** Nothing appears in an impact report
   without a sentence saying which relationship put it there, and relationships
   the source does not state are not followed at all.
+- **Child processes go through an injectable runner.** Nothing in
+  `core/testing` spawns directly, so the engine is tested against stand-in
+  runners rather than against whatever happens to be installed.
+- **A test result is reported, not interpreted.** A failing test means the test
+  did not pass; deciding what that says about the code is not something running
+  it can do.
 
 ## Dependencies
 
@@ -608,7 +723,9 @@ is read by running the `git` you already have via `node:child_process`, tests
 use `node:test`, and the ANSI palette is a few lines of local code. The rest of
 the development toolchain is ESLint and Prettier.
 
-`verify changes` needs `git` on your `PATH`; nothing else does.
+`verify changes` and `verify impact` need `git` on your `PATH`. `verify tests`
+needs the project's own test runner installed in its `node_modules`; neither is
+bundled here, and neither is resolved from a global install.
 
 ## Development
 
@@ -632,9 +749,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow.
 ## Roadmap
 
 Stage 1 built the foundation, Stage 2 the Git change detection, Stage 3 the
-codebase analysis, and Stage 4 the impact analysis that joins them. Later
-stages build checks on top. Scope for those is decided when they start; nothing
-beyond this stage is implemented or promised here.
+codebase analysis, Stage 4 the impact analysis that joins them, and Stage 5 the
+test engine that acts on it. Scope for later stages is decided when they start;
+nothing beyond this stage is implemented or promised here.
 
 ## License
 

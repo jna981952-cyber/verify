@@ -3,7 +3,7 @@ import { parseArgs } from 'node:util';
 import { UsageError, toErrorMessage } from '../utils/errors.js';
 
 /** Subcommands the CLI understands. */
-export const COMMANDS = ['changes', 'analyze', 'impact'] as const;
+export const COMMANDS = ['changes', 'analyze', 'impact', 'tests'] as const;
 
 /** Union of the recognised subcommands. */
 export type CliCommand = (typeof COMMANDS)[number];
@@ -22,6 +22,14 @@ export interface CliArgs {
   readonly noColor: boolean;
   /** Hops to follow when tracing impact, or `null` to use the default. */
   readonly depth: number | null;
+  /** Restrict `tests` to what the current changes reach. */
+  readonly impacted: boolean;
+  /** Name filter passed to the test runner, or `null` for none. */
+  readonly test: string | null;
+  /** How long a test run may take, or `null` to use the default. */
+  readonly timeout: number | null;
+  /** Discover and select without running anything. */
+  readonly list: boolean;
 }
 
 /** Directory inspected when the user does not pass one. */
@@ -33,6 +41,10 @@ const OPTIONS = {
   json: { type: 'boolean', default: false },
   'no-color': { type: 'boolean', default: false },
   depth: { type: 'string' },
+  impacted: { type: 'boolean', default: false },
+  test: { type: 'string' },
+  timeout: { type: 'string' },
+  list: { type: 'boolean', default: false },
 } as const;
 
 /**
@@ -54,6 +66,30 @@ function parseDepth(value: string | undefined): number | null {
   }
 
   return Number(value);
+}
+
+/**
+ * Reads `--timeout`, which must be a positive number of milliseconds.
+ *
+ * @throws {UsageError} If the value is not a positive whole number.
+ */
+function parseTimeout(value: string | undefined): number | null {
+  if (value === undefined) {
+    return null;
+  }
+
+  if (!/^\d+$/.test(value) || Number(value) === 0) {
+    throw new UsageError(
+      `--timeout must be a positive number of milliseconds, but received: ${value}`,
+    );
+  }
+
+  return Number(value);
+}
+
+/** Reads a string option, treating an absent one as unset. */
+function readString(value: boolean | string | undefined): string | null {
+  return typeof value === 'string' ? value : null;
 }
 
 function isCommand(value: string): value is CliCommand {
@@ -133,6 +169,10 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
     target,
     json: values.json === true,
     noColor: values['no-color'] === true,
-    depth: parseDepth(typeof values.depth === 'string' ? values.depth : undefined),
+    depth: parseDepth(readString(values.depth) ?? undefined),
+    impacted: values.impacted === true,
+    test: readString(values.test),
+    timeout: parseTimeout(readString(values.timeout) ?? undefined),
+    list: values.list === true,
   };
 }
